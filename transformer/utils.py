@@ -125,6 +125,7 @@ class DataReader(object):
         scp_reader = zark.ArkReader(src_shuf_path)
         while True:
             uttid, input, looped = scp_reader.read_next_utt()
+            
             if looped:
                 break
 
@@ -132,7 +133,13 @@ class DataReader(object):
             if target is None:
                 logging.warn('uttid=' + str(uttid) + ',target is None')
                 continue
-
+                
+            # change frame rate      
+            frame_splice = self._config.frame_splice
+            feat_len, feat_dim = np.shape(input)
+            valid_feat_len = feat_len // frame_splice
+            input = np.reshape(input[:valid_feat_len, :], [valid_feat_len, feat_dim * frame_splice])   
+                
             input_len = len(input)
             target_len = len(target)
             if input_len > max_length or target_len > max_length:
@@ -211,10 +218,7 @@ class DataReader(object):
         for i in range(batch_size):
             feat = indices[i]
             
-            frame_splice = self._config.frame_splice
-            feat_len, feat_dim = np.shape(feat)
-            valid_feat_len = feat_len // frame_splice
-            feat = np.reshape(feat[:valid_feat_len, :], [valid_feat_len, feat_dim * frame_splice])
+
             feat_len, feat_dim = np.shape(feat)
             
             padding = np.zeros([maxlen - feat_len, feat_dim], dtype=np.float32)
