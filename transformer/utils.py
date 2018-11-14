@@ -6,6 +6,7 @@ import logging
 import os
 from tempfile import mkstemp
 
+import time
 import numpy as np
 import tensorflow as tf
 import tensorflow.contrib.framework as tff
@@ -124,6 +125,7 @@ class DataReader(object):
         count = 0
         scp_reader = zark.ArkReader(src_shuf_path)
         while True:
+            start_time = time.time()
             uttid, input, looped = scp_reader.read_next_utt()
             
             if looped:
@@ -165,6 +167,7 @@ class DataReader(object):
                 feat_batch, feat_batch_mask = self._create_feat_batch(caches[bucket][0])
                 target_batch, target_batch_mask = self._create_target_batch(caches[bucket][1], self.dst2idx)
                 # yield (feat_batch, feat_batch_mask, target_batch, target_batch_mask)
+                logging.info("Loading this batch cost {}s".format(time.time()-start_time))
                 yield (feat_batch, target_batch, len(caches[bucket][0]))
                 caches[bucket] = [[], [], 0, 0]
 
