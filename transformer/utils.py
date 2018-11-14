@@ -138,7 +138,7 @@ class DataReader(object):
             frame_splice = self._config.frame_splice
             feat_len, feat_dim = np.shape(input)
             valid_feat_len = feat_len // frame_splice
-            input = np.reshape(input[:valid_feat_len, :], [valid_feat_len, feat_dim * frame_splice])   
+            input = np.reshape(input[:valid_feat_len*frame_splice, :], [valid_feat_len, feat_dim * frame_splice])   
                 
             input_len = len(input)
             target_len = len(target)
