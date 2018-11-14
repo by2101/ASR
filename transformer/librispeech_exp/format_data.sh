@@ -22,7 +22,8 @@ cp $test_dir/feats.scp $dest_dir/test.scp
 cp $test_dir/text $dest_dir/test.tra
 
 cut -d" " -f2- $dest_dir/train.tra | tr ' ' '\n' | sort | uniq -c | sort -nr > $dest_dir/unigram
-cat $dest_dir/unigram | awk '{print $2}' > $dest_dir/wordlist
+echo "<PAD> <UNK> <S> </S>" | tr ' ' '\n' > $dest_dir/wordlist 
+cat $dest_dir/unigram | awk '{print $2}' >> $dest_dir/wordlist
 
 echo "Formatting done."
 
