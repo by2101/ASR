@@ -210,7 +210,13 @@ class DataReader(object):
         feat_batch_mask = np.ones([batch_size, maxlen], dtype=np.int32)
         for i in range(batch_size):
             feat = indices[i]
+            
+            frame_splice = self._config.frame_splice
             feat_len, feat_dim = np.shape(feat)
+            valid_feat_len = feat_len // frame_splice
+            feat = np.reshape(feat[:valid_feat_len, :], [valid_feat_len, feat_dim * frame_splice])
+            feat_len, feat_dim = np.shape(feat)
+            
             padding = np.zeros([maxlen - feat_len, feat_dim], dtype=np.float32)
             padding.fill(PAD_INDEX)
             feat = np.concatenate([feat, padding], axis=0)
@@ -631,3 +637,9 @@ def multihead_attention(query_antecedent,
         x = common_attention.combine_heads(x)
         x = dense(x, output_depth, name="output_transform")
         return x
+
+if __name__ == "__main__":
+    import yaml
+    c = './config_librispeech_char_unit512_block6_left3_big_dim80_sp.yaml'
+    config = AttrDict(yaml.load(open(c)))
+    data_loader = DataReader(config)
