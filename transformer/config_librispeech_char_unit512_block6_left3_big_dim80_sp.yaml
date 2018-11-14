@@ -17,12 +17,13 @@ model_dir: 'librispeech_exp/exp/log_dir_unit512_block6_timescale5_left3_sub3_lr1
 bucket_min: 50
 bucket_max: 10000
 bucket_step: 10
+frame_splice: 3
 train:
     num_gpus: 8
     tokens_per_batch: 50000
     src_path: 'librispeech_exp/train.scp'
     dst_path: 'librispeech_exp/train.tra'
-    max_length: 5000
+    max_length: 1000
     num_epochs: 30
     num_steps: 300000
     save_freq: 200
@@ -37,7 +38,7 @@ train:
     eval_on_dev: False
 #    input_dim: 129
 #    input_dim: 516
-    input_dim: 320
+    input_dim: 120
     var_filter: ''
 dev:
     batch_size: 256
