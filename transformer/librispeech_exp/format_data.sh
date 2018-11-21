@@ -16,9 +16,10 @@ for f in feats.scp text; do
     done
 done
 
-cp $train_dir/feats.scp $dest_dir/train.scp
+cp $train_dir/utt2dur $dest_dir/train_utt2dur
+cp $train_dir/feats.scp $dest_dir/train_feats.scp
 cp $train_dir/text $dest_dir/train.tra
-cp $test_dir/feats.scp $dest_dir/test.scp
+cp $test_dir/feats.scp $dest_dir/test_feats.scp
 cp $test_dir/text $dest_dir/test.tra
 
 cut -d" " -f2- $dest_dir/train.tra | tr ' ' '\n' | sort | uniq -c | sort -nr > $dest_dir/unigram
