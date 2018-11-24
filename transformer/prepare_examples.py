@@ -46,7 +46,7 @@ def parse_tra(fn, word_to_id):
             if not c in word_to_id:
                 logger.warn("utt {}: {} is not in wordlist. Replace it with <UNK>.".format(item[0], c))
                 c = "<UNK>"
-            words = []    
+            words.append(word_to_id[c])    
         tra_dic[item[0]] = words
     return tra_dic
 
@@ -171,8 +171,11 @@ def process_trainingset_to_tfrecord(srcdir, destdir, max_count_one_file=10000):
             example = tf.train.Example(features=tf.train.Features(
                 feature={
                     'utt': tf.train.Feature(bytes_list=tf.train.BytesList(value=[utt])), 
-                    'feats': tf.train.Feature(bytes_list=tf.train.BytesList(value=[feats.tobytes()])), 
-                    'labels': tf.train.Feature(int64_list =tf.train.Int64List(value=labels))
+                    'feats': tf.train.Feature(bytes_list=tf.train.BytesList(value=[feats.tobytes()])),
+                    'feat_dim': tf.train.Feature(int64_list =tf.train.Int64List(value=[feats.shape[1]])),
+                    'feat_len': tf.train.Feature(int64_list =tf.train.Int64List(value=[feats.shape[0]])),
+                    'labels': tf.train.Feature(int64_list =tf.train.Int64List(value=labels)),
+                    'labels_len': tf.train.Feature(int64_list =tf.train.Int64List(value=[len(labels)])),
                     }
                     ))     
             writer.write(example.SerializeToString())
