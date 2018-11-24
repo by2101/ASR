@@ -25,6 +25,37 @@ BOS = u'<S>'
 EOS = u'</S>'
 
 
+def parse_tfrecord(serialized_example):
+    features = {
+        'utt': tf.FixedLenFeature([], tf.string),
+        'feats': tf.FixedLenFeature([], tf.string),
+        'feat_dim': tf.FixedLenFeature([], tf.int64),
+        'feat_len': tf.FixedLenFeature([], tf.int64),
+        'labels': tf.FixedLenSequenceFeature([], tf.int64, allow_missing=True),
+        'labels_len': tf.FixedLenFeature([], tf.int64),        
+    }
+    return tf.parse_single_example(serialized_example, features)
+    
+def gen_input(tfrecords):
+
+    filename_queue = tf.train.string_input_producer(tfrecords,)
+    reader = tf.TFRecordReader()
+    _, serialized_example = reader.read(filename_queue)
+    features = parse_tfrecord(serialized_example)
+    
+    feat_dim = features['feat_dim']
+    feat_len = features['feat_len']
+    
+    feats = tf.decode_raw(features['feats'],tf.float32)
+    feats = tf.reshape(feats, tf.stack([feat_len, feat_dim], axis=0))
+    labels = tf.cast(features['labels'], tf.int32)
+    utt  = features['utt']
+    labels = tf.concat([labels, tf.convert_to_tensor([EOS_INDEX])], axis=0)
+       
+    return utt, feats, labels
+    
+
+
 class AttrDict(dict):
     """
     Dictionary whose keys can be accessed as attributes.
@@ -104,7 +135,7 @@ class DataReader(object):
 
         caches = {}
         for bucket in buckets:
-            caches[bucket] = [[], [], 0, 0]  # src sentences, dst sentences, src tokens, dst tokens
+            caches[bucket] = [[], [], 0, 0]  # src sentences, dst sentences, #src_tokens , #dst_tokens
 
         uttid_target_map = {}
         for line in codecs.open(dst_shuf_path, 'r', 'utf-8'):
@@ -124,8 +155,10 @@ class DataReader(object):
         random_caches = []
         count = 0
         scp_reader = zark.ArkReader(src_shuf_path)
+        
+        start_time = 0
         while True:
-            start_time = time.time()
+            
             uttid, input, looped = scp_reader.read_next_utt()
             
             if looped:
@@ -177,7 +210,7 @@ class DataReader(object):
             if len(caches[bucket][0]) > 0:
                 src_len = len(caches[bucket][0])
                 if self._config.min_count_in_bucket is None:
-                    default_min_count_in_bucket = 100
+                    default_min_count_in_bucket = 10
                     logging.info(
                         'min_count_in_bucket=' + str(
                             self._config.min_count_in_bucket) + ',use default_min_count_in_bucket=' + str(
@@ -220,10 +253,7 @@ class DataReader(object):
         feat_batch_mask = np.ones([batch_size, maxlen], dtype=np.int32)
         for i in range(batch_size):
             feat = indices[i]
-            
-
-            feat_len, feat_dim = np.shape(feat)
-            
+            feat_len, feat_dim = np.shape(feat)           
             padding = np.zeros([maxlen - feat_len, feat_dim], dtype=np.float32)
             padding.fill(PAD_INDEX)
             feat = np.concatenate([feat, padding], axis=0)
@@ -646,7 +676,25 @@ def multihead_attention(query_antecedent,
         return x
 
 if __name__ == "__main__":
+    # For debugging
     import yaml
-    c = './config_librispeech_char_unit512_block6_left3_big_dim80_sp.yaml'
-    config = AttrDict(yaml.load(open(c)))
-    data_loader = DataReader(config)
+    # c = './config_librispeech_char_unit512_block6_left3_big_dim80_sp.yaml'
+    # config = AttrDict(yaml.load(open(c)))
+    # data_loader = DataReader(config)
+    
+    
+    tfrecords = ["librispeech_exp/train.{}.tfrecord".format(i) for i in range(3)]
+    utt, feats, labels = gen_input(tfrecords)
+    # batch = tf.train.shuffle_batch([feats, labels], batch_size=3, capacity=10, num_threads=4)
+    # batch = tf.train.batch([feats, labels], batch_size=3, num_threads=4)
+    batch = feats, labels
+    
+    with tf.Session() as sess: #开始一个会话 
+        init_op = tf.global_variables_initializer() 
+        sess.run(init_op) 
+        coord=tf.train.Coordinator() 
+        threads= tf.train.start_queue_runners(coord=coord) 
+        for i in range(1): 
+            f, l = sess.run(batch)#在会话中取出image和label
+        coord.request_stop()
+        coord.join(threads)
