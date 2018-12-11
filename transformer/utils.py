@@ -34,7 +34,16 @@ def parse_tfrecord(serialized_example):
         'labels': tf.FixedLenSequenceFeature([], tf.int64, allow_missing=True),
         'labels_len': tf.FixedLenFeature([], tf.int64),        
     }
-    return tf.parse_single_example(serialized_example, features)
+    
+    parsed_features = tf.parse_single_example(serialized_example, features)
+    feat_dim = parsed_features['feat_dim']
+    feat_len = parsed_features['feat_len']    
+    feats = tf.decode_raw(parsed_features['feats'],tf.float32)
+    feats = tf.reshape(feats, tf.stack([feat_len, feat_dim], axis=0))
+    labels = tf.cast(parsed_features['labels'], tf.int32)
+    utt  = parsed_features['utt']
+    labels = tf.concat([labels, tf.convert_to_tensor([EOS_INDEX])], axis=0)    
+    return utt, feats, labels
     
 def gen_input(tfrecords):
 
@@ -459,7 +468,146 @@ class DataReader(object):
             sents.append(' '.join(sent))
         return sents
 
+        
+class DataReaderTfrecord(object):
+    """
+    Read data and create batches for training and testing.
+    """
 
+    def __init__(self, config, sess, datadir):
+        self._config = config
+        self._tmps = set()
+        self.load_vocab()
+        self.sess = sess
+        self.tfrecord_fns = [os.path.join(datadir, fn) for fn in os.listdir(datadir) if fn[-8:]=='tfrecord']
+
+    def __del__(self):
+        for fname in self._tmps:
+            if os.path.exists(fname):
+                os.remove(fname)
+
+    def load_vocab(self):
+        """
+        Load vocab from disk.
+        The first four items in the vocab should be <PAD>, <UNK>, <S>, </S>
+        """
+
+        def load_vocab_(path, vocab_size):
+            vocab = [line.split()[0] for line in codecs.open(path, 'r', 'utf-8')]
+            vocab = vocab[:vocab_size]
+            assert len(vocab) == vocab_size
+            word2idx = {word: idx for idx, word in enumerate(vocab)}
+            idx2word = {idx: word for idx, word in enumerate(vocab)}
+            return word2idx, idx2word
+
+        logging.info('Load vocabularies %s.' % (self._config.dst_vocab))
+        self.dst2idx, self.idx2dst = load_vocab_(self._config.dst_vocab, self._config.dst_vocab_size)
+
+    def get_training_batches(self, batch_sz):
+        """
+        Generate batches according to bucket setting.
+        """
+        dataset = tf.data.TFRecordDataset(filenames=self.tfrecord_fns)
+        dataset = dataset.map(parse_tfrecord)
+        iterator = dataset.make_one_shot_iterator()
+        next_element = iterator.get_next()        
+
+        stop_iter = False
+        start_time = 0
+        while not stop_iter:
+            feats = []
+            targets = []
+            for i in range(batch_sz):
+                try:
+                    u, f, l = self.sess.run(next_element)
+                except tf.errors.OutOfRangeError:
+                    stop_iter = True
+                    break
+                frame_splice = self._config.frame_splice    
+                feat_len, feat_dim = np.shape(f)    
+                valid_feat_len = feat_len // frame_splice
+                f = np.reshape(f[:valid_feat_len*frame_splice, :], [valid_feat_len, feat_dim * frame_splice])   
+                feats.append(f)
+                targets.append(l)
+                
+            feat_batch, feat_batch_mask = self._create_feat_batch(feats)
+            target_batch, target_batch_mask = self._create_target_idx_batch(targets)
+            # yield (feat_batch, feat_batch_mask, target_batch, target_batch_mask)
+            yield (feat_batch, target_batch, len(targets))
+        return
+
+    def _create_feat_batch(self, indices):
+        # Pad to the same length.
+        # indices的数据是[[feat_len1, feat_dim], [feat_len2, feat_dim], ...]
+        maxlen = max([len(s) for s in indices])
+        batch_size = len(indices)
+        feat_batch = []
+        feat_batch_mask = np.ones([batch_size, maxlen], dtype=np.int32)
+        for i in range(batch_size):
+            feat = indices[i]
+            feat_len, feat_dim = np.shape(feat)
+            padding = np.zeros([maxlen - feat_len, feat_dim], dtype=np.float32)
+            padding.fill(PAD_INDEX)
+            feat = np.concatenate([feat, padding], axis=0)
+            feat_batch.append(feat)
+            feat_batch_mask[i, :feat_len] = 0
+        feat_batch = np.stack(feat_batch, axis=0)
+        return feat_batch, feat_batch_mask
+
+        
+    def _create_target_idx_batch(self, sents):
+        # sents的数据是[word1 word2 ... wordn]
+        
+        indices = sents
+        # Pad to the same length.
+        batch_size = len(sents)
+        maxlen = max([len(s) for s in indices])
+        target_batch = np.zeros([batch_size, maxlen], np.int32)
+        
+        target_batch.fill(PAD_INDEX)
+        target_batch_mask = np.ones([batch_size, maxlen], dtype=np.int32)
+     
+        for i, x in enumerate(indices):
+            target_batch[i, :len(x)] = x
+            target_batch_mask[i, :len(x)] = 0
+        return target_batch, target_batch_mask        
+        
+
+    def get_test_batches(self, src_path, batch_size):
+        scp_reader = zark.ArkReader(src_path)
+        cache = []
+        uttids = []
+        while True:
+            uttid, feat, loop = scp_reader.read_next_utt()
+            if loop:
+                break
+            cache.append(feat)
+            uttids.append(uttid)
+            if len(cache) >= batch_size:
+                feat_batch, feat_batch_mask = self._create_feat_batch(cache)
+                # yield feat_batch, feat_batch_mask, uttids
+                yield feat_batch, uttids
+                cache = []
+                uttids = []
+        if cache:
+            feat_batch, feat_batch_mask = self._create_feat_batch(cache)
+            # yield feat_batch, feat_batch_mask, uttids
+            yield feat_batch, uttids
+
+    def indices_to_words(self, Y, o='dst'):
+        assert o in ('src', 'dst')
+        idx2word = self.idx2src if o == 'src' else self.idx2dst
+        sents = []
+        for y in Y:  # for each sentence
+            sent = []
+            for i in y:  # For each word
+                if i == 3:  # </S>
+                    break
+                w = idx2word[i]
+                sent.append(w)
+            sents.append(' '.join(sent))
+        return sents
+        
 def expand_feed_dict(feed_dict):
     """If the key is a tuple of placeholders,
     split the input data then feed them into these placeholders.
@@ -678,23 +826,39 @@ def multihead_attention(query_antecedent,
 if __name__ == "__main__":
     # For debugging
     import yaml
-    # c = './config_librispeech_char_unit512_block6_left3_big_dim80_sp.yaml'
-    # config = AttrDict(yaml.load(open(c)))
-    # data_loader = DataReader(config)
+    c = './config_librispeech_char_unit512_block6_left3_big_dim80_sp.yaml'
+    config = AttrDict(yaml.load(open(c)))
+    # data_loader = DataReaderTfrecord(config)
     
     
-    tfrecords = ["librispeech_exp/train.{}.tfrecord".format(i) for i in range(3)]
-    utt, feats, labels = gen_input(tfrecords)
-    # batch = tf.train.shuffle_batch([feats, labels], batch_size=3, capacity=10, num_threads=4)
-    # batch = tf.train.batch([feats, labels], batch_size=3, num_threads=4)
-    batch = feats, labels
+    # tfrecords = ["librispeech_exp/train.{}.tfrecord".format(i) for i in range(3)]
+    # tfrecords = ["librispeech_exp/train.0.tfrecord"]
+    # dataset = tf.data.TFRecordDataset(filenames=tfrecords)
+    # dataset = dataset.map(parse_tfrecord)
+    # # dataset = dataset.padded_batch(4, padded_shapes=([1], [30], [1000, 40]))
+    # iterator = dataset.make_one_shot_iterator()
+    # next_element = iterator.get_next()
     
+    # # utt, feats, labels = gen_input(tfrecords)
+    # # batch = tf.train.shuffle_batch([feats, labels], batch_size=3, capacity=10, num_threads=4)
+    # # batch = tf.train.batch([feats, labels], batch_size=3, num_threads=4)
+    # # batch = feats, labels
+         
+
     with tf.Session() as sess: #开始一个会话 
         init_op = tf.global_variables_initializer() 
         sess.run(init_op) 
-        coord=tf.train.Coordinator() 
-        threads= tf.train.start_queue_runners(coord=coord) 
-        for i in range(1): 
-            f, l = sess.run(batch)#在会话中取出image和label
-        coord.request_stop()
-        coord.join(threads)
+        data_loader = DataReaderTfrecord(config, sess, 'librispeech_exp')
+
+        for d in data_loader.get_training_batches(32):
+            print(d[1], d[2])
+        
+        # for epoch in range(5):
+            # for batch in range(20):
+                # try:
+                    # u, f, l = sess.run(next_element)#在会话中取出image和label
+                # except tf.errors.OutOfRangeError:
+                    # print("End")
+                    # break
+        # coord.request_stop()
+        # coord.join(threads)
