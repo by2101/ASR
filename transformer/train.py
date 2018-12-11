@@ -13,7 +13,7 @@ def train(config):
     logger = logging.getLogger('')
 
     """Train a model with a config file."""
-    data_reader = DataReader(config=config)
+    
     model = eval(config.model)(config=config, num_gpus=config.train.num_gpus)
     model.build_train_model(test=config.train.eval_on_dev)
 
@@ -38,7 +38,9 @@ def train(config):
                 logger.info('Nothing to be reload from disk.')
         else:
             logger.info('Nothing to be reload from disk.')
-
+        
+        data_reader = DataReaderTfrecord(config, sess, config.train.data_dir)
+        
         evaluator = Evaluator()
         evaluator.init_from_existed(model, sess, data_reader)
 
@@ -47,7 +49,7 @@ def train(config):
         toleration = config.train.toleration
 
         def train_one_step(batch):
-            feat_batch, target_batch,batch_size = batch
+            feat_batch, target_batch, batch_size = batch
             feed_dict = expand_feed_dict({model.src_pls: feat_batch,
                                           model.dst_pls: target_batch})
             step, lr, loss, _ = sess.run(
@@ -73,7 +75,7 @@ def train(config):
 
         step = 0
         for epoch in range(1, config.train.num_epochs+1):
-            for batch in data_reader.get_training_batches_with_buckets():
+            for batch in data_reader.get_training_batches():
 
                 # Train normal instances.
                 start_time = time.time()
@@ -118,7 +120,6 @@ if __name__ == '__main__':
     parser = ArgumentParser()
     parser.add_argument('-c', '--config', dest='config')
     args = parser.parse_args()
-    args.config = './config_template_char_unit512_block6_left3_big_dim80_sp.yaml'
     config = AttrDict(yaml.load(open(args.config)))
     # Logger
     if not os.path.exists(config.model_dir):
