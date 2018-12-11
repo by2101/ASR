@@ -6,7 +6,7 @@ import yaml
 
 from evaluate import Evaluator
 from model import *
-from utils import DataReader, AttrDict, available_variables, expand_feed_dict
+from utils import DataReaderTfrecord, AttrDict, available_variables, expand_feed_dict
 
 
 def train(config):
@@ -51,11 +51,12 @@ def train(config):
         def train_one_step(batch):
             feat_batch, target_batch, batch_size = batch
             feed_dict = expand_feed_dict({model.src_pls: feat_batch,
-                                          model.dst_pls: target_batch})
+                                          model.dst_pls: target_batch}) 
             step, lr, loss, _ = sess.run(
                 [model.global_step, model.learning_rate,
                  model.loss, model.train_op],
                 feed_dict=feed_dict)
+               
             if step % config.train.summary_freq == 0:
                 summary = sess.run(model.summary_op, feed_dict=feed_dict)
                 summary_writer.add_summary(summary, global_step=step)
@@ -75,7 +76,7 @@ def train(config):
 
         step = 0
         for epoch in range(1, config.train.num_epochs+1):
-            for batch in data_reader.get_training_batches():
+            for batch in data_reader.get_training_batches(config.train.batch_sz):
 
                 # Train normal instances.
                 start_time = time.time()

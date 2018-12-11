@@ -19,8 +19,10 @@ bucket_max: 10000
 bucket_step: 10
 frame_splice: 3
 train:
-    num_gpus: 8
+    num_gpus: 2
     tokens_per_batch: 50000
+    batch_sz: 4
+    data_dir: 'librispeech_exp'
     src_path: 'librispeech_exp/train.scp'
     dst_path: 'librispeech_exp/train.tra'
     max_length: 1000
